@@ -1,0 +1,5 @@
+name: LiteminerBukkit
+version: 1.0.0
+main: com.github.canon.liteminerbukkit.LiteminerBukkit
+api-version: '26.1'
+description: Server-side implementation of the Liteminer mod for Bukkit/Paper.
