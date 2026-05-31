@@ -12,8 +12,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 
 import java.util.*;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 public class BlockBreakListener implements Listener {
 
@@ -77,13 +75,13 @@ public class BlockBreakListener implements Listener {
         Player player = event.getPlayer();
         LiteminerBukkit.LiteminerState state = plugin.getPlayerState(player);
 
-        if (!state.isKeybindPressed()) return;
+        if (!state.keybindPressed()) return;
 
         Block startBlock = event.getBlock();
         Material targetType = startBlock.getType();
         ItemStack tool = player.getInventory().getItemInMainHand();
 
-        Set<Block> blocksToMine = getBlocksToMine(player, startBlock, targetType, state.getShape());
+        Set<Block> blocksToMine = getBlocksToMine(player, startBlock, targetType, state.shape());
 
         // 原点に近い順でソート (元のMODと同様)
         List<Block> sorted = new ArrayList<>(blocksToMine);

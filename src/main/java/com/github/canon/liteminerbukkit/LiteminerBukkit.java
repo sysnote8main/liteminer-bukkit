@@ -2,6 +2,7 @@ package com.github.canon.liteminerbukkit;
 
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.messaging.Messenger;
 
 import java.util.Map;
 import java.util.UUID;
@@ -22,11 +23,12 @@ public final class LiteminerBukkit extends JavaPlugin {
         getLogger().info("LiteminerBukkit is starting...");
 
         // プラグインメッセージの送受信登録
-        getServer().getMessenger().registerIncomingPluginChannel(this, C2S_KEYBIND, new NetworkListener(this));
-        getServer().getMessenger().registerOutgoingPluginChannel(this, C2S_KEYBIND);
-        getServer().getMessenger().registerOutgoingPluginChannel(this, S2C_SHAPE);
-        getServer().getMessenger().registerOutgoingPluginChannel(this, AMBER_PING);
-        getServer().getMessenger().registerOutgoingPluginChannel(this, AMBER_PONG);
+        Messenger messenger = getServer().getMessenger();
+        messenger.registerIncomingPluginChannel(this, C2S_KEYBIND, new NetworkListener(this));
+        messenger.registerOutgoingPluginChannel(this, C2S_KEYBIND);
+        messenger.registerOutgoingPluginChannel(this, S2C_SHAPE);
+        messenger.registerOutgoingPluginChannel(this, AMBER_PING);
+        messenger.registerOutgoingPluginChannel(this, AMBER_PONG);
 
         // イベント登録
         getServer().getPluginManager().registerEvents(new BlockBreakListener(this), this);
@@ -36,7 +38,8 @@ public final class LiteminerBukkit extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        getServer().getMessenger().unregisterIncomingPluginChannel(this, C2S_KEYBIND);
+        getServer().getMessenger().unregisterIncomingPluginChannel(this);
+        getServer().getMessenger().unregisterOutgoingPluginChannel(this);
         getLogger().info("LiteminerBukkit disabled.");
     }
 
@@ -48,21 +51,5 @@ public final class LiteminerBukkit extends JavaPlugin {
         return playerStates.getOrDefault(player.getUniqueId(), new LiteminerState(false, 0));
     }
 
-    public static class LiteminerState {
-        private final boolean keybindPressed;
-        private final int shape;
-
-        public LiteminerState(boolean keybindPressed, int shape) {
-            this.keybindPressed = keybindPressed;
-            this.shape = shape;
-        }
-
-        public boolean isKeybindPressed() {
-            return keybindPressed;
-        }
-
-        public int getShape() {
-            return shape;
-        }
-    }
+    public record LiteminerState(boolean keybindPressed, int shape) {}
 }
