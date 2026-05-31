@@ -12,6 +12,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 
 import java.util.*;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class BlockBreakListener implements Listener {
 
@@ -35,22 +37,19 @@ public class BlockBreakListener implements Listener {
 
     private static void registerFamily(Material... mats) {
         Set<Material> family = Set.of(mats);
-        for (Material m : mats) {
-            BLOCK_FAMILIES.put(m, family);
-        }
+        family.forEach(m -> BLOCK_FAMILIES.put(m, family));
     }
 
     /**
      * Shapeless用: BlockFamily.matches() の再現
      * 同じMaterial、またはファミリーマッチなら true
      */
-    private static boolean familyMatches(Material from, Material to) {
+    protected static boolean familyMatches(Material from, Material to) {
         if (from == to) return true;
         Set<Material> family = BLOCK_FAMILIES.get(from);
         if (family != null && family.contains(to)) return true;
         family = BLOCK_FAMILIES.get(to);
-        if (family != null && family.contains(from)) return true;
-        return false;
+        return family != null && family.contains(from);
     }
 
     /**
@@ -59,15 +58,14 @@ public class BlockBreakListener implements Listener {
      * - Hardness < 0 (ベドロックなど) はfalse
      * - それ以外はtrue
      */
-    private static boolean shouldMine(Block block) {
+    protected static boolean shouldMine(Block block) {
         Material mat = block.getType();
         if (mat == Material.AIR || mat == Material.CAVE_AIR || mat == Material.VOID_AIR) return false;
         if (mat.isLegacy()) return false;
         // 液体
         if (mat == Material.WATER || mat == Material.LAVA) return false;
         // Hardness -1 = indestructible (bedrock etc.)
-        if (block.getType().getHardness() < 0) return false;
-        return true;
+        return !(block.getType().getHardness() < 0);
     }
 
     public BlockBreakListener(LiteminerBukkit plugin) {
@@ -103,10 +101,10 @@ public class BlockBreakListener implements Listener {
             }
 
             // 耐久値チェック: 残り2以下で停止 (preventToolBreaking の再現)
-            if (tool.getItemMeta() instanceof Damageable) {
+            if (tool.getItemMeta() instanceof Damageable dm) {
                 int maxDur = tool.getType().getMaxDurability();
                 if (maxDur > 0) {
-                    int damage = ((Damageable) tool.getItemMeta()).getDamage();
+                    int damage = dm.getDamage();
                     if (maxDur - damage <= 2) break;
                 }
             }
@@ -121,8 +119,7 @@ public class BlockBreakListener implements Listener {
 
             // ツール耐久消耗: hardness == 0 のブロック (草花など即時破壊) は消費しない
             // (オリジナルの state.getDestroySpeed() != 0.0f チェックに相当)
-            if (block.getType().getHardness() != 0.0f && tool.getItemMeta() instanceof Damageable) {
-                Damageable dm = (Damageable) tool.getItemMeta();
+            if (block.getType().getHardness() != 0.0f && tool.getItemMeta() instanceof Damageable dm) {
                 dm.setDamage(dm.getDamage() + 1);
                 tool.setItemMeta(dm);
             }
@@ -132,14 +129,13 @@ public class BlockBreakListener implements Listener {
     // ===== シェイプ別ブロック収集 =====
 
     private Set<Block> getBlocksToMine(Player player, Block origin, Material targetType, int shapeIndex) {
-        switch (shapeIndex) {
-            case 0:  return shapeless(origin, targetType);
-            case 1:  return smallTunnel(player, origin);
-            case 2:  return staircaseUp(player, origin);
-            case 3:  return staircaseDown(player, origin);
-            case 4:  return threeByThree(player, origin);
-            default: return shapeless(origin, targetType);
-        }
+        return switch (shapeIndex) {
+            case 1 -> smallTunnel(player, origin);
+            case 2 -> staircaseUp(player, origin);
+            case 3 -> staircaseDown(player, origin);
+            case 4 -> threeByThree(player, origin);
+            default -> shapeless(origin, targetType);
+        };
     }
 
     /**
@@ -225,32 +221,8 @@ public class BlockBreakListener implements Listener {
      * 各ステップで cursor, cursor.above(), cursor.below() の3ブロックを判定し、
      * direction+UP 方向に進む。3つ全てが shouldMine() falseの場合のみ停止。
      */
-    private Set<Block> staircaseUp(Player player, Block origin) {
-        Set<Block> result = new HashSet<>();
-        result.add(origin);
-
-        BlockFace face = getTargetBlockFace(player);
-        BlockFace stairDir = getStairDirection(player, face);
-
-        Block cursor = origin;
-        while (result.size() < MAX_BLOCKS) {
-            Block above = cursor.getRelative(BlockFace.UP);
-            Block below = cursor.getRelative(BlockFace.DOWN);
-
-            boolean mineAbove = shouldMine(above);
-            boolean mineCursor = shouldMine(cursor);
-            boolean mineBelow = shouldMine(below);
-
-            // オリジナルと同じ: 3つ全てがfalseのときだけ停止
-            if (!mineAbove && !mineCursor && !mineBelow) break;
-
-            if (mineCursor && !result.contains(cursor)) addWithinLimit(result, cursor);
-            if (mineBelow && !result.contains(below))   addWithinLimit(result, below);
-            if (mineAbove && !result.contains(above))   addWithinLimit(result, above);
-
-            cursor = cursor.getRelative(stairDir).getRelative(BlockFace.UP);
-        }
-        return result;
+    protected Set<Block> staircaseUp(Player player, Block origin) {
+        return staircase(player, origin, true);
     }
 
     /**
@@ -258,7 +230,11 @@ public class BlockBreakListener implements Listener {
      * 各ステップで cursor, cursor.below(), cursor.below().below() の3ブロックを判定し、
      * direction+DOWN 方向に進む。3つ全てが shouldMine() falseの場合のみ停止。
      */
-    private Set<Block> staircaseDown(Player player, Block origin) {
+    protected Set<Block> staircaseDown(Player player, Block origin) {
+        return staircase(player, origin, false);
+    }
+
+    protected Set<Block> staircase(Player player, Block origin, boolean isUp) {
         Set<Block> result = new HashSet<>();
         result.add(origin);
 
@@ -267,21 +243,21 @@ public class BlockBreakListener implements Listener {
 
         Block cursor = origin;
         while (result.size() < MAX_BLOCKS) {
-            Block below1 = cursor.getRelative(BlockFace.DOWN);
-            Block below2 = below1.getRelative(BlockFace.DOWN);
+            Block alpha = cursor.getRelative(isUp ? BlockFace.UP: BlockFace.DOWN);
+            Block beta = isUp ? cursor.getRelative(BlockFace.DOWN): alpha.getRelative(BlockFace.DOWN);
 
+            boolean mineAbove = shouldMine(alpha);
             boolean mineCursor = shouldMine(cursor);
-            boolean mineBelow1 = shouldMine(below1);
-            boolean mineBelow2 = shouldMine(below2);
+            boolean mineBelow = shouldMine(beta);
 
             // オリジナルと同じ: 3つ全てがfalseのときだけ停止
-            if (!mineCursor && !mineBelow1 && !mineBelow2) break;
+            if (!mineAbove && !mineCursor && !mineBelow) break;
 
             if (mineCursor && !result.contains(cursor)) addWithinLimit(result, cursor);
-            if (mineBelow1 && !result.contains(below1)) addWithinLimit(result, below1);
-            if (mineBelow2 && !result.contains(below2)) addWithinLimit(result, below2);
+            if (mineBelow && !result.contains(beta))   addWithinLimit(result, beta);
+            if (mineAbove && !result.contains(alpha))   addWithinLimit(result, alpha);
 
-            cursor = cursor.getRelative(stairDir).getRelative(BlockFace.DOWN);
+            cursor = cursor.getRelative(stairDir).getRelative(isUp ? BlockFace.UP: BlockFace.DOWN);
         }
         return result;
     }
@@ -328,18 +304,19 @@ public class BlockBreakListener implements Listener {
     // ===== ユーティリティ =====
 
     /** オリジナルの addIfWithinLimit() の再現 */
-    private static void addWithinLimit(Set<Block> set, Block block) {
+    protected static void addWithinLimit(Set<Block> set, Block block) {
         if (set.size() < MAX_BLOCKS) set.add(block);
     }
 
     /**
      * プレイヤーが見ているブロックの「当たった面」を返す
      */
-    private BlockFace getTargetBlockFace(Player player) {
+    protected BlockFace getTargetBlockFace(Player player) {
         List<Block> twoBlocks = player.getLastTwoTargetBlocks(null, 10);
         if (twoBlocks.size() != 2 || !twoBlocks.get(1).getType().isSolid()) return BlockFace.SOUTH;
         Block targetBlock = twoBlocks.get(1);
         Block adjacent = twoBlocks.get(0);
+
         BlockFace f = targetBlock.getFace(adjacent);
         return f != null ? f : BlockFace.SOUTH;
     }
@@ -347,34 +324,34 @@ public class BlockBreakListener implements Listener {
     /**
      * Staircase用: 叩いた面がUP/DOWNならプレイヤー水平向き、それ以外は逆面 (= 進む方向)
      */
-    private BlockFace getStairDirection(Player player, BlockFace face) {
+    protected BlockFace getStairDirection(Player player, BlockFace face) {
         if (face == BlockFace.UP || face == BlockFace.DOWN) {
             return getHorizontalFacing(player);
         }
         return face.getOppositeFace();
     }
 
-    private BlockFace rotateClockwise(BlockFace face) {
-        switch (face) {
-            case NORTH: return BlockFace.EAST;
-            case EAST:  return BlockFace.SOUTH;
-            case SOUTH: return BlockFace.WEST;
-            case WEST:  return BlockFace.NORTH;
-            default:    return face;
-        }
+    protected BlockFace rotateClockwise(BlockFace face) {
+        return switch (face) {
+            case NORTH -> BlockFace.EAST;
+            case EAST -> BlockFace.SOUTH;
+            case SOUTH -> BlockFace.WEST;
+            case WEST -> BlockFace.NORTH;
+            default -> face;
+        };
     }
 
-    private BlockFace rotateCounterClockwise(BlockFace face) {
-        switch (face) {
-            case NORTH: return BlockFace.WEST;
-            case WEST:  return BlockFace.SOUTH;
-            case SOUTH: return BlockFace.EAST;
-            case EAST:  return BlockFace.NORTH;
-            default:    return face;
-        }
+    protected BlockFace rotateCounterClockwise(BlockFace face) {
+        return switch (face) {
+            case NORTH -> BlockFace.WEST;
+            case WEST -> BlockFace.SOUTH;
+            case SOUTH -> BlockFace.EAST;
+            case EAST -> BlockFace.NORTH;
+            default -> face;
+        };
     }
 
-    private BlockFace getHorizontalFacing(Player player) {
+    protected BlockFace getHorizontalFacing(Player player) {
         float yaw = (player.getLocation().getYaw() % 360 + 360) % 360;
         if (yaw >= 45 && yaw < 135)  return BlockFace.WEST;
         if (yaw >= 135 && yaw < 225) return BlockFace.NORTH;
